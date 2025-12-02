@@ -29,8 +29,12 @@ RUN LIBTIFF_PATH=$(find /usr/lib -name "libtiff.so" | head -n 1) && \
 RUN APP_ICON_URL=https://res.wx.qq.com/a/wx_fed/assets/res/NTI4MWU5.ico && \
     install_app_icon.sh "$APP_ICON_URL"
     
-# 设置应用名称
-ENV APP_NAME="WeChat"
+# 修复：创建必要的环境变量配置文件
+RUN mkdir -p /etc/cont-env.d && \
+    # 创建 APP_NAME 环境变量文件，使用简单的方式设置
+    echo '#!/bin/sh' > /etc/cont-env.d/APP_NAME && \
+    echo 'export APP_NAME="WeChat"' >> /etc/cont-env.d/APP_NAME && \
+    chmod +x /etc/cont-env.d/APP_NAME
 
 # 获取系统架构信息并安装微信
 RUN ARCH=$(uname -m) && \
