@@ -32,7 +32,7 @@ RUN APP_ICON_URL=https://res.wx.qq.com/a/wx_fed/assets/res/NTI4MWU5.ico && \
 # 设置应用名称
 ENV APP_NAME="WeChat"
 
-# 获取系统架构信息
+# 获取系统架构信息并安装微信
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then \
         PACKAGE_URL="https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb"; \
@@ -47,12 +47,13 @@ RUN ARCH=$(uname -m) && \
     dpkg -i "$PACKAGE_NAME" 2>&1 | tee /tmp/wechat_install.log && \
     # 提取版本号并设置环境变量
     APP_VERSION=$(grep -o 'Unpacking wechat ([0-9.]*)' /tmp/wechat_install.log | sed 's/Unpacking wechat (\(.*\))/\1/') && \
-    echo "APP_VERSION=$APP_VERSION" > /tmp/app_version.env && \
+    echo "APP_VERSION=$APP_VERSION" > /etc/cont-env.d/APP_VERSION && \
+    echo "APP_NAME=WeChat" > /etc/cont-env.d/APP_NAME && \
     rm "$PACKAGE_NAME"
 
-# 配置微信版本号（从文件读取）
-RUN if [ -f /tmp/app_version.env ]; then \
-        source /tmp/app_version.env && \
+# 显示检测到的版本号
+RUN if [ -f /etc/cont-env.d/APP_VERSION ]; then \
+        . /etc/cont-env.d/APP_VERSION && \
         echo "Detected WeChat version: $APP_VERSION"; \
     else \
         echo "Warning: Could not detect WeChat version"; \
@@ -72,4 +73,4 @@ VOLUME /root/xwechat_files
 VOLUME /root/downloads
 
 # 清理临时文件
-RUN rm -f /tmp/app_version.env
+RUN rm -f /tmp/wechat_install.log
