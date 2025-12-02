@@ -13,7 +13,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4  # 升级到 v4
+      uses: actions/checkout@v4
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -25,7 +25,7 @@ jobs:
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}          
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
         
     - name: Build image with metadata
       id: build
@@ -41,36 +41,47 @@ jobs:
     - name: Extract version and metadata
       id: extract
       run: |
-        # 提取版本号和其他元数据
-        NEW_VERSION=$(docker run --rm temp-image printenv APP_VERSION 2>/dev/null || echo "unknown")
+        # 从容器内文件提取版本号（新方法）
+        NEW_VERSION=$(docker run --rm temp-image cat /etc/cont-env.d/APP_VERSION 2>/dev/null || echo "APP_VERSION=unknown")
         
-        # 如果无法从环境变量获取，尝试其他方法
-        if [ "$NEW_VERSION" = "unknown" ]; then
-          # 尝试从容器内文件获取
-          NEW_VERSION=$(docker run --rm temp-image bash -c \
-            "find /etc/cont-env.d -name 'APP_VERSION' -exec cat {} \; 2>/dev/null || echo 'unknown'")
+        # 提取版本号值（去掉"APP_VERSION="前缀）
+        NEW_VERSION_VALUE=$(echo "$NEW_VERSION" | cut -d'=' -f2)
+        
+        # 如果版本号为unknown，尝试从安装日志中提取
+        if [ "$NEW_VERSION_VALUE" = "unknown" ]; then
+          # 尝试从安装日志中提取版本号
+          NEW_VERSION_VALUE=$(docker run --rm temp-image bash -c \
+            'grep -o "Unpacking wechat ([0-9.]*)" /tmp/wechat_install.log 2>/dev/null | sed "s/Unpacking wechat (\(.*\))/\1/" || echo "unknown"')
         fi
         
-        echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+        echo "new_version=${NEW_VERSION_VALUE}" >> $GITHUB_OUTPUT
         
         FULL_IMAGE_NAME="${{ secrets.DOCKER_REPOSITORY }}/${{ secrets.DOCKER_IMAGE_NAME }}"
         
         # 检查是否已有该版本的镜像存在
-        if docker manifest inspect $FULL_IMAGE_NAME:$NEW_VERSION >/dev/null 2>&1; then
-          echo "version_exists=true" >> $GITHUB_OUTPUT
+        if [ "$NEW_VERSION_VALUE" != "unknown" ]; then
+          if docker manifest inspect $FULL_IMAGE_NAME:$NEW_VERSION_VALUE >/dev/null 2>&1; then
+            echo "version_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "version_exists=false" >> $GITHUB_OUTPUT
+          fi
         else
           echo "version_exists=false" >> $GITHUB_OUTPUT
         fi
         
-        # 提取更多信息用于日志
-        APP_NAME=$(docker run --rm temp-image printenv APP_NAME 2>/dev/null || echo "WeChat")
-        echo "app_name=${APP_NAME}" >> $GITHUB_OUTPUT
+        # 提取应用名称
+        APP_NAME=$(docker run --rm temp-image cat /etc/cont-env.d/APP_NAME 2>/dev/null || echo "APP_NAME=WeChat")
+        APP_NAME_VALUE=$(echo "$APP_NAME" | cut -d'=' -f2)
+        echo "app_name=${APP_NAME_VALUE}" >> $GITHUB_OUTPUT
+        
+        # 输出调试信息
+        echo "Extracted version: $NEW_VERSION_VALUE"
+        echo "Extracted app name: $APP_NAME_VALUE"
         
     - name: Check version existence
       if: steps.extract.outputs.version_exists == 'true'
       run: |
         echo "Version ${{ steps.extract.outputs.new_version }} already exists in registry. Skipping push."
-        exit 0
         
     - name: Tag and push image
       if: steps.extract.outputs.version_exists == 'false'
@@ -79,20 +90,31 @@ jobs:
         FULL_IMAGE_NAME="${{ secrets.DOCKER_REPOSITORY }}/${{ secrets.DOCKER_IMAGE_NAME }}"
         
         # 清理版本号，只保留数字和点
-        CLEAN_VERSION=$(echo "$VERSION" | sed 's/[^0-9.]//g')
+        CLEAN_VERSION=$(echo "$VERSION" | grep -o '[0-9.]*' | head -1)
         if [ -z "$CLEAN_VERSION" ]; then
-          CLEAN_VERSION="latest"
+          # 如果没有有效版本号，使用日期作为标签
+          DATE_TAG=$(date +%Y%m%d-%H%M%S)
+          CLEAN_VERSION="build-$DATE_TAG"
         fi
+        
+        echo "Using version tag: $CLEAN_VERSION"
         
         # 标记镜像
         docker tag temp-image $FULL_IMAGE_NAME:$CLEAN_VERSION
-        docker tag temp-image $FULL_IMAGE_NAME:latest
         
-        # 推送镜像（先推送特定版本，再推送latest）
+        # 只有版本号包含数字和点时才推送latest标签
+        if echo "$CLEAN_VERSION" | grep -q '^[0-9][0-9.]*[0-9]$'; then
+          docker tag temp-image $FULL_IMAGE_NAME:latest
+          echo "Will push both $CLEAN_VERSION and latest tags"
+        else
+          echo "Will only push $CLEAN_VERSION tag (not latest)"
+        fi
+        
+        # 推送镜像
         docker push $FULL_IMAGE_NAME:$CLEAN_VERSION
         
         # 只有版本号有效时才推送latest标签
-        if [ "$CLEAN_VERSION" != "latest" ] && [ "$CLEAN_VERSION" != "unknown" ]; then
+        if echo "$CLEAN_VERSION" | grep -q '^[0-9][0-9.]*[0-9]$'; then
           docker push $FULL_IMAGE_NAME:latest
         fi
         
@@ -104,8 +126,8 @@ jobs:
         # 清理临时镜像
         docker rmi temp-image 2>/dev/null || true
         
-    - name: Create GitHub Release (Optional)
-      if: steps.extract.outputs.version_exists == 'false' && steps.extract.outputs.new_version != 'unknown'
+    - name: Create GitHub Release
+      if: steps.extract.outputs.version_exists == 'false' && steps.extract.outputs.new_version != 'unknown' && steps.extract.outputs.new_version != ''
       uses: softprops/action-gh-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -114,3 +136,4 @@ jobs:
         name: WeChat ${{ steps.extract.outputs.new_version }}
         draft: false
         prerelease: false
+        generate_release_notes: true
