@@ -45,8 +45,8 @@ RUN ARCH=$(uname -m) && \
     else \
         echo "Unsupported architecture: $ARCH" && exit 1; \
     fi && \
-    # 下载微信安装包
-    curl -O "$PACKAGE_URL" && \
+    # 下载微信安装包：添加 -k 忽略证书错误，并增加网络容错参数
+    curl -k --retry 3 --connect-timeout 30 -O "$PACKAGE_URL" && \
     PACKAGE_NAME=$(basename "$PACKAGE_URL") && \
     dpkg -i "$PACKAGE_NAME" 2>&1 | tee /tmp/wechat_install.log && \
     # 提取版本号并设置环境变量
