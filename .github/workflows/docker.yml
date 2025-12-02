@@ -62,7 +62,7 @@ jobs:
         
         # 构建完整的镜像名称
         DOCKER_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
-        IMAGE_NAME="wechat"  # 或者从输入/secrets获取
+        IMAGE_NAME="docker-wechat"  # 或者从输入/secrets获取
         
         if [ -z "$DOCKER_USERNAME" ]; then
           echo "Error: DOCKERHUB_USERNAME secret is not set!"
@@ -103,7 +103,7 @@ jobs:
       run: |
         VERSION="${{ steps.extract.outputs.new_version }}"
         DOCKER_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
-        IMAGE_NAME="wechat"
+        IMAGE_NAME="docker-wechat"
         FULL_IMAGE_NAME="${DOCKER_USERNAME}/${IMAGE_NAME}"
         
         echo "Using image name: $FULL_IMAGE_NAME"
