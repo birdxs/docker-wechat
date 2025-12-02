@@ -4,6 +4,10 @@ on:
   push:
     branches: [ "main-test" ]
 
+env:
+  DOCKER_REPOSITORY: ${{ secrets.DOCKERHUB_USERNAME }}  # 假设DOCKERHUB_USERNAME就是你的仓库名
+  DOCKER_IMAGE_NAME: "docker-wechat"  # 或者从secrets读取
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -41,7 +45,7 @@ jobs:
     - name: Extract version and metadata
       id: extract
       run: |
-        # 从容器内文件提取版本号（新方法）
+        # 从容器内文件提取版本号
         NEW_VERSION=$(docker run --rm temp-image cat /etc/cont-env.d/APP_VERSION 2>/dev/null || echo "APP_VERSION=unknown")
         
         # 提取版本号值（去掉"APP_VERSION="前缀）
@@ -56,10 +60,20 @@ jobs:
         
         echo "new_version=${NEW_VERSION_VALUE}" >> $GITHUB_OUTPUT
         
-        FULL_IMAGE_NAME="${{ secrets.DOCKER_REPOSITORY }}/${{ secrets.DOCKER_IMAGE_NAME }}"
+        # 构建完整的镜像名称
+        DOCKER_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
+        IMAGE_NAME="wechat"  # 或者从输入/secrets获取
+        
+        if [ -z "$DOCKER_USERNAME" ]; then
+          echo "Error: DOCKERHUB_USERNAME secret is not set!"
+          exit 1
+        fi
+        
+        FULL_IMAGE_NAME="${DOCKER_USERNAME}/${IMAGE_NAME}"
+        echo "full_image_name=${FULL_IMAGE_NAME}" >> $GITHUB_OUTPUT
         
         # 检查是否已有该版本的镜像存在
-        if [ "$NEW_VERSION_VALUE" != "unknown" ]; then
+        if [ "$NEW_VERSION_VALUE" != "unknown" ] && [ -n "$NEW_VERSION_VALUE" ]; then
           if docker manifest inspect $FULL_IMAGE_NAME:$NEW_VERSION_VALUE >/dev/null 2>&1; then
             echo "version_exists=true" >> $GITHUB_OUTPUT
           else
@@ -76,7 +90,8 @@ jobs:
         
         # 输出调试信息
         echo "Extracted version: $NEW_VERSION_VALUE"
-        echo "Extracted app name: $APP_NAME_VALUE"
+        echo "Full image name: $FULL_IMAGE_NAME"
+        echo "DockerHub username: $DOCKER_USERNAME"
         
     - name: Check version existence
       if: steps.extract.outputs.version_exists == 'true'
@@ -87,7 +102,12 @@ jobs:
       if: steps.extract.outputs.version_exists == 'false'
       run: |
         VERSION="${{ steps.extract.outputs.new_version }}"
-        FULL_IMAGE_NAME="${{ secrets.DOCKER_REPOSITORY }}/${{ secrets.DOCKER_IMAGE_NAME }}"
+        DOCKER_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
+        IMAGE_NAME="wechat"
+        FULL_IMAGE_NAME="${DOCKER_USERNAME}/${IMAGE_NAME}"
+        
+        echo "Using image name: $FULL_IMAGE_NAME"
+        echo "Original version: $VERSION"
         
         # 清理版本号，只保留数字和点
         CLEAN_VERSION=$(echo "$VERSION" | grep -o '[0-9.]*' | head -1)
@@ -95,6 +115,7 @@ jobs:
           # 如果没有有效版本号，使用日期作为标签
           DATE_TAG=$(date +%Y%m%d-%H%M%S)
           CLEAN_VERSION="build-$DATE_TAG"
+          echo "No valid version found, using date-based tag: $CLEAN_VERSION"
         fi
         
         echo "Using version tag: $CLEAN_VERSION"
@@ -106,16 +127,17 @@ jobs:
         if echo "$CLEAN_VERSION" | grep -q '^[0-9][0-9.]*[0-9]$'; then
           docker tag temp-image $FULL_IMAGE_NAME:latest
           echo "Will push both $CLEAN_VERSION and latest tags"
+          
+          # 推送镜像
+          echo "Pushing $FULL_IMAGE_NAME:$CLEAN_VERSION"
+          docker push $FULL_IMAGE_NAME:$CLEAN_VERSION
+          
+          echo "Pushing $FULL_IMAGE_NAME:latest"
+          docker push $FULL_IMAGE_NAME:latest
         else
           echo "Will only push $CLEAN_VERSION tag (not latest)"
-        fi
-        
-        # 推送镜像
-        docker push $FULL_IMAGE_NAME:$CLEAN_VERSION
-        
-        # 只有版本号有效时才推送latest标签
-        if echo "$CLEAN_VERSION" | grep -q '^[0-9][0-9.]*[0-9]$'; then
-          docker push $FULL_IMAGE_NAME:latest
+          echo "Pushing $FULL_IMAGE_NAME:$CLEAN_VERSION"
+          docker push $FULL_IMAGE_NAME:$CLEAN_VERSION
         fi
         
         echo "Successfully pushed new version: $CLEAN_VERSION"
@@ -127,7 +149,7 @@ jobs:
         docker rmi temp-image 2>/dev/null || true
         
     - name: Create GitHub Release
-      if: steps.extract.outputs.version_exists == 'false' && steps.extract.outputs.new_version != 'unknown' && steps.extract.outputs.new_version != ''
+      if: steps.extract.outputs.version_exists == 'false' && steps.extract.outputs.new_version != 'unknown' && steps.extract.outputs.new_version != '' && github.event_name == 'push'
       uses: softprops/action-gh-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
