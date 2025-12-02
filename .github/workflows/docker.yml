@@ -1,4 +1,4 @@
-name: Docker WeChat CI
+name: Docker WeChat CI birdxs
 on:
   workflow_dispatch:
   push:
