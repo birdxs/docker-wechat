@@ -30,7 +30,7 @@ RUN APP_ICON_URL=https://res.wx.qq.com/a/wx_fed/assets/res/NTI4MWU5.ico && \
     install_app_icon.sh "$APP_ICON_URL"
     
 # 设置应用名称
-RUN set-cont-env APP_NAME "Wechat"
+ENV APP_NAME="WeChat"
 
 # 获取系统架构信息
 RUN ARCH=$(uname -m) && \
@@ -45,15 +45,31 @@ RUN ARCH=$(uname -m) && \
     curl -O "$PACKAGE_URL" && \
     PACKAGE_NAME=$(basename "$PACKAGE_URL") && \
     dpkg -i "$PACKAGE_NAME" 2>&1 | tee /tmp/wechat_install.log && \
+    # 提取版本号并设置环境变量
+    APP_VERSION=$(grep -o 'Unpacking wechat ([0-9.]*)' /tmp/wechat_install.log | sed 's/Unpacking wechat (\(.*\))/\1/') && \
+    echo "APP_VERSION=$APP_VERSION" > /tmp/app_version.env && \
     rm "$PACKAGE_NAME"
+
+# 配置微信版本号（从文件读取）
+RUN if [ -f /tmp/app_version.env ]; then \
+        source /tmp/app_version.env && \
+        echo "Detected WeChat version: $APP_VERSION"; \
+    else \
+        echo "Warning: Could not detect WeChat version"; \
+    fi
 
 RUN echo '#!/bin/sh' > /startapp.sh && \
     echo 'exec /usr/bin/wechat' >> /startapp.sh && \
     chmod +x /startapp.sh
 
+# 设置容器配置
+ENV CONT_NAME="WeChat"
+ENV CONT_DESCRIPTION="WeChat Desktop Client"
+ENV CONT_ICON_OVERLAY=1
+
 VOLUME /root/.xwechat
 VOLUME /root/xwechat_files
 VOLUME /root/downloads
 
-# 配置微信版本号
-RUN set-cont-env APP_VERSION "$(grep -o 'Unpacking wechat ([0-9.]*)' /tmp/wechat_install.log | sed 's/Unpacking wechat (\(.*\))/\1/')"
+# 清理临时文件
+RUN rm -f /tmp/app_version.env
